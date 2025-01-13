@@ -1,20 +1,27 @@
 from io import BufferedReader
 from struct import unpack
 from parseXml.handlers.metadata import xmlMetadataGroup, xmlMetadataItem
-
+import os
 
 def parseDataTree(file: BufferedReader, endianness: str, item: xmlMetadataItem | xmlMetadataGroup):
     match item:
         case xmlMetadataItem():
             return {item.name: parseDataPoint(file, endianness, item)}
         case xmlMetadataGroup():
-            if item.name.lower() == "images":
-                skipParse(file, item)
-                return "[images]"
             return {item.name: [parseDataTree(file, endianness, child) for child in item.children]}
 
 def parseDataPoint(file: BufferedReader, endianness: str, item: xmlMetadataItem):
+    # print (item.name)
     match item.type.lower():
+        case "vecuint8":
+            if "Vis" in item.name:
+                return readImage(file, item.size, endianness, item.name)
+            else:
+                skipParse(file, item)
+                return ""
+        case "cvmat":
+            skipParse(file, item)
+            return ""
         case "string":
             return readStr(file, item.size)
         case "version":
@@ -27,7 +34,11 @@ def parseDataPoint(file: BufferedReader, endianness: str, item: xmlMetadataItem)
         case "cvrect":
             return (readPoint(file, endianness), readPoint(file, endianness))
         case typeName if "float" in typeName:
-            return readFloat(file, item.size, endianness)
+            if "Temperature" in item.type:
+                #convert Kelvin to degrees Celsius
+                return readFloat(file, item.size, endianness) - 273.15
+            else:
+                return readFloat(file, item.size, endianness)
         case _:
             return readInt(file, item.size, endianness)
 
@@ -40,7 +51,15 @@ def getSize(item: xmlMetadataGroup | xmlMetadataItem):
             return item.size
         case xmlMetadataGroup():
             return sum((getSize(child) for child in item.children))
-        
+
+def readImage(file: BufferedReader, size: int, endianness: str, name: str):
+    sizeRead = readInt(file, 4, endianness)
+    data = file.read(sizeRead)
+    filename = name + ".jpg"
+    with open(filename, "wb") as binary_file:
+        binary_file.write(data)
+    return os.path.join(os.getcwd(), filename)
+
 def readInt(file: BufferedReader, size: int, endianness: str):
     return int.from_bytes(file.read(size), endianness)
 
