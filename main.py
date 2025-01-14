@@ -15,5 +15,5 @@ if __name__ == "__main__":
 
         data = parseDataTree(f, endianness, metadata)
         
-        print(json.dumps(data, indent=1))
-
+        # print(json.dumps(data, indent=1))
+        print(data)
