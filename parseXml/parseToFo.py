@@ -9,14 +9,14 @@ def readToFo(file: BufferedReader) -> str:
     toFoStart: int = 0
     tofoLen: int = 0
     for line in file:
-        found = findStrInBytes(line, "<ToFo")
-        toFoStart += found or len(line)
-        if found: break
+         found = findStrInBytes(line, "<ToFo")
+         toFoStart += found if found is not False else len(line)
+         if found: break
     file.seek(toFoStart)
     for line in file:
-        found = findStrInBytes(line, "ToFo>")
-        tofoLen += found or len(line)
-        if found: break
+         found = findStrInBytes(line, "ToFo>")
+         tofoLen += found if found is not False else len(line)
+         if found: break
     file.seek(toFoStart)
     header = file.read(tofoLen + len("ToFo>".encode()))
     return header.decode()

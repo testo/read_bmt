@@ -13,6 +13,7 @@ def parseDataTree(file: BufferedReader, endianness: str, item: xmlMetadataItem |
 
 def parseDataPoint(file: BufferedReader, endianness: str, item: xmlMetadataItem):
     # print (item.name)
+    print(item)
     match item.type.lower():
         case "vecuint8":
             if "Vis" in item.name:
@@ -23,7 +24,7 @@ def parseDataPoint(file: BufferedReader, endianness: str, item: xmlMetadataItem)
                 skipParse(file, item)
                 return ""
         case "cvmat":
-            return readMat(file, item.size, endianness)
+                return readMat(file, item.size, endianness, item.name == "Ir")
         case "string":
             return readStr(file, item.size)
         case "version":
@@ -54,19 +55,24 @@ def getSize(item: xmlMetadataGroup | xmlMetadataItem):
         case xmlMetadataGroup():
             return sum((getSize(child) for child in item.children))
 
-def readMat(file: BufferedReader, size: int, endianness: str):
+def readMat(file: BufferedReader, size: int, endianness: str, is_ir : bool):
     dims = readInt(file, 4, endianness) #2 
     rows = readInt(file, 4, endianness) #240
     cols = readInt(file, 4, endianness) #320
     depth = readInt(file, 4, endianness) #2 CV_16U - 16-bit unsigned integers ( 0..65535 )
     channels = readInt(file, 4, endianness) #1
     element_size = readInt(file, 4, endianness) #2
+    print(f"dims:{dims}\nrows:{rows}\ncols:{cols}\ndepth:{depth}\nchannels:{channels}\nelement_size:{element_size}")
 
-    if dims != depth or depth != element_size or dims != element_size:
-        raise NotImplementedError("Mat in wrong format")
-    
     size_remaining = size - (6 * 4)
     data = file.read(size_remaining)
+    if not is_ir:
+        return "ignoring mat"
+    
+    if dims != depth or depth != element_size or dims != element_size:
+        raise NotImplementedError(f"Mat in wrong format: {dims} != {depth} or {depth} != {element_size} or {dims} != {element_size}")
+        print("Mat in wrong format")
+    
     np_array = np.frombuffer(data, dtype=np.int16)       
     mat_shape = (rows, cols, channels) 
     matInt16 = np_array.reshape(mat_shape) 
