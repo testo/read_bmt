@@ -4,6 +4,30 @@ from parseXml.handlers.metadata import xmlMetadataGroup, xmlMetadataItem
 import os
 import numpy as np
 
+MARKED_FLOAT_MARKERS = {
+    0x00: None,           # Valid – no annotation needed
+    0x01: "OtherMark",
+    0x03: "Underrange",
+    0x05: "Overrange",
+    0x07: "Invalid",
+}
+
+def markedFloatAnnotation(raw_uint32: int) -> str | None:
+    """Return a marker annotation string if the low 3 bits indicate a non-valid
+    MarkedFloat, or None if the value is valid (bits [2:0] == 0x00).
+
+    Also returns a special annotation when the low bits happen to be a known
+    marker code but the source is likely a plain float written without marker
+    awareness (i.e. the camera firmware wrote raw Kelvin bytes).  In that case
+    the annotation is prefixed with '?' to indicate ambiguity."""
+    bits = raw_uint32 & 0x07
+    label = MARKED_FLOAT_MARKERS.get(bits)
+    if label is None:
+        return None          # properly valid MarkedFloat
+    # bits [2:0] are non-zero – could be intentional marker OR accidental
+    # collision from a plain-float writer (firmware).  Flag with '?'.
+    return f"?{label}"
+
 def parseDataTree(file: BufferedReader, endianness: str, item: xmlMetadataItem | xmlMetadataGroup):
     match item:
         case xmlMetadataItem():
@@ -37,11 +61,16 @@ def parseDataPoint(file: BufferedReader, endianness: str, item: xmlMetadataItem)
         case "cvrect":
             return (readPoint(file, endianness), readPoint(file, endianness))
         case typeName if "float" in typeName:
+            value, raw_uint32 = readFloatRaw(file, item.size, endianness)
+            is_marked = item.size == 4 and "MarkedFloat" in item.type
             if "Temperature" in item.type:
-                #convert Kelvin to degrees Celsius
-                return readFloat(file, item.size, endianness) - 273.15
-            else:
-                return readFloat(file, item.size, endianness)
+                value -= 273.15
+            if is_marked:
+                annotation = markedFloatAnnotation(raw_uint32)
+                if annotation is not None:
+                    print(f"  WARNING: {item.name} has non-valid MarkedFloat marker: {annotation} (raw=0x{raw_uint32:08X})")
+                    return f"{value} [{annotation}]"
+            return value
         case _:
             return readInt(file, item.size, endianness)
 
@@ -64,15 +93,15 @@ def readMat(file: BufferedReader, size: int, endianness: str, is_ir : bool):
     element_size = readInt(file, 4, endianness) #2
     print(f"dims:{dims}\nrows:{rows}\ncols:{cols}\ndepth:{depth}\nchannels:{channels}\nelement_size:{element_size}")
 
+    
+    if dims != depth or depth != element_size or dims != element_size:
+        #raise NotImplementedError(f"Mat in wrong format: {dims} != {depth} or {depth} != {element_size} or {dims} != {element_size}")
+        print("Mat in wrong format")
+    
     size_remaining = size - (6 * 4)
     data = file.read(size_remaining)
     if not is_ir:
         return "ignoring mat"
-    
-    if dims != depth or depth != element_size or dims != element_size:
-        raise NotImplementedError(f"Mat in wrong format: {dims} != {depth} or {depth} != {element_size} or {dims} != {element_size}")
-        print("Mat in wrong format")
-    
     np_array = np.frombuffer(data, dtype=np.int16)       
     mat_shape = (rows, cols, channels) 
     matInt16 = np_array.reshape(mat_shape) 
@@ -115,6 +144,18 @@ def readImage(file: BufferedReader, size: int, endianness: str, name: str):
 
 def readInt(file: BufferedReader, size: int, endianness: str):
     return int.from_bytes(file.read(size), endianness)
+
+def readFloatRaw(file: BufferedReader, size: int, endianness: str) -> tuple:
+    """Read float(s) and return (value_or_tuple, raw_uint32_of_first_float).
+    raw_uint32 is the little-endian uint32 of the first 4 bytes, used for
+    MarkedFloat marker-bit inspection."""
+    mode = ">" if endianness == "big" else "<"
+    if size % 4 != 0: raise NotImplementedError
+    readBytes = file.read(size)
+    raw_uint32 = int.from_bytes(readBytes[:4], "little")
+    if size == 4:
+        return unpack(f"{mode}f", readBytes)[0], raw_uint32
+    return unpack(f"{mode}{size // 4}f", readBytes), raw_uint32
 
 def readFloat(file: BufferedReader, size: int, endianness: str):
     mode = ">" if endianness == "big" else "<"
